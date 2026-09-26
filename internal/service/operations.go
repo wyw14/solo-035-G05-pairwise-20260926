@@ -20,6 +20,8 @@ func (runtime *Runtime) Snapshot() model.RuntimeSnapshot {
 		})
 		status, synced := runtime.Sync.Status(event.ID)
 		snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "frame-sync", Passed: synced && status.Stable, Detail: status.Reason})
+		lipSync := runtime.LipSyncProfile(event.ID)
+		snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "lip-sync-measurement", Passed: lipSync.Valid(), Detail: lipSync.Reason})
 		captionStatus, captionKnown := runtime.Captions.Get(event.ID)
 		captionPassed := captionKnown && captionStatus.Continuous && captionStatus.EncoderErr == ""
 		snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "caption-continuity", Passed: captionPassed, Detail: captionStatus.EncoderErr})

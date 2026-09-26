@@ -36,6 +36,16 @@ func Bootstrap(runtime *Runtime) error {
 			return err
 		}
 	}
+	// 采集音画同步参考信号：同一序号的视频标记与音频脉冲，脉冲稳定滞后约 12ms。
+	for sequence := int64(1); sequence <= 3; sequence++ {
+		markerAt := base.Add(time.Duration(sequence) * 40 * time.Millisecond)
+		if _, err := coordinator.RecordSyncMarker(event.ID, sourceID, sequence, markerAt); err != nil {
+			return err
+		}
+		if _, err := coordinator.RecordAudioPulse(event.ID, sourceID, sequence, markerAt.Add(12*time.Millisecond)); err != nil {
+			return err
+		}
+	}
 	if err := coordinator.ConfigureProgram(event.ID, sourceID); err != nil {
 		return err
 	}

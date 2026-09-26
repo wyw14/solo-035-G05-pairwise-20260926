@@ -40,6 +40,7 @@ func (coordinator *Coordinator) PrepareSignal(eventID model.EventID, sourceID mo
 		return model.SignalStatus{}, err
 	}
 	coordinator.runtime.Quality.Reset(eventID)
+	coordinator.runtime.LipSync.Reset(eventID)
 	if err := coordinator.runtime.Sync.Open(eventID, 3); err != nil {
 		return model.SignalStatus{}, err
 	}
@@ -135,11 +136,88 @@ func (coordinator *Coordinator) CommitOnAir(eventID model.EventID, fence uint64)
 	if _, err := coordinator.runtime.Quality.Permit(eventID, true, true); err != nil {
 		return err
 	}
-	if err := coordinator.runtime.Playout.CommitOnAir(event, fence, map[string]any{"offset_ms": 0, "source_generation": event.SourceGeneration}); err != nil {
+	output, ok := coordinator.runtime.Playout.Output(eventID)
+	if !ok {
+		return fmt.Errorf("playout output for event %s is not staged", eventID)
+	}
+	proof, _, err := coordinator.runtime.LipSync.Proof(eventID, output.Source, event.SourceGeneration, event.Revision, coordinator.runtime.Clock())
+	if err != nil {
+		// 缺测、抖动超限或属于旧代次/旧版本时，禁止用固定值冒充播出证明。
 		return err
 	}
-	_, err := coordinator.runtime.EventFlow.MarkOnAir(eventID)
+	if err := coordinator.runtime.Playout.CommitOnAir(event, fence, proof); err != nil {
+		return err
+	}
+	_, err = coordinator.runtime.EventFlow.MarkOnAir(eventID)
 	return err
+}
+
+// RecordSyncMarker 记录视频同步标记的实测时间戳，按事件当前的信号源代次与节目版本归档。
+func (coordinator *Coordinator) RecordSyncMarker(eventID model.EventID, sourceID model.SourceID, index int64, observedAt time.Time) (model.LipSyncProfile, error) {
+	if err := coordinator.requireEvent(eventID); err != nil {
+		return model.LipSyncProfile{}, err
+	}
+	if observedAt.IsZero() {
+		observedAt = coordinator.runtime.Clock()
+	}
+	event, _ := coordinator.runtime.Events.Get(eventID)
+	if err := coordinator.runtime.LipSync.RecordMarker(eventID, model.SyncMarker{
+		Source:           sourceID,
+		SourceGeneration: event.SourceGeneration,
+		Revision:         event.Revision,
+		Index:            index,
+		ObservedAt:       observedAt,
+	}); err != nil {
+		return model.LipSyncProfile{}, err
+	}
+	return coordinator.LipSyncStatus(eventID), nil
+}
+
+// RecordAudioPulse 记录音频参考脉冲的实测时间戳，与同 index 的视频标记配对。
+func (coordinator *Coordinator) RecordAudioPulse(eventID model.EventID, sourceID model.SourceID, index int64, observedAt time.Time) (model.LipSyncProfile, error) {
+	if err := coordinator.requireEvent(eventID); err != nil {
+		return model.LipSyncProfile{}, err
+	}
+	if observedAt.IsZero() {
+		observedAt = coordinator.runtime.Clock()
+	}
+	event, _ := coordinator.runtime.Events.Get(eventID)
+	if err := coordinator.runtime.LipSync.RecordPulse(eventID, model.AudioPulse{
+		Source:           sourceID,
+		SourceGeneration: event.SourceGeneration,
+		Revision:         event.Revision,
+		Index:            index,
+		ObservedAt:       observedAt,
+	}); err != nil {
+		return model.LipSyncProfile{}, err
+	}
+	return coordinator.LipSyncStatus(eventID), nil
+}
+
+// LipSyncStatus 返回事件当前信号源代次与节目版本下的音画实测档案。
+func (coordinator *Coordinator) LipSyncStatus(eventID model.EventID) model.LipSyncProfile {
+	return coordinator.runtime.LipSyncProfile(eventID)
+}
+
+func (coordinator *Coordinator) requireEvent(eventID model.EventID) error {
+	if _, ok := coordinator.runtime.Events.Get(eventID); !ok {
+		return fmt.Errorf("event %s not found", eventID)
+	}
+	return nil
+}
+
+// resolveSource 返回事件当前正在播出/暂存的信号源；显式指定且有效时以指定值为准。
+func (coordinator *Coordinator) resolveSource(eventID model.EventID, explicit model.SourceID) (model.SourceID, error) {
+	if explicit.Valid() {
+		return explicit, nil
+	}
+	if output, ok := coordinator.runtime.Playout.Output(eventID); ok {
+		return output.Source, nil
+	}
+	if status, ok := coordinator.runtime.Sync.Status(eventID); ok && status.Source.Valid() {
+		return status.Source, nil
+	}
+	return "", fmt.Errorf("event %s has no current signal source", eventID)
 }
 
 func (coordinator *Coordinator) ScheduleFailover(ctx context.Context, eventID model.EventID, delay time.Duration) (<-chan error, error) {

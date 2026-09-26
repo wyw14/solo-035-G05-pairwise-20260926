@@ -24,11 +24,12 @@ type EventDetail struct {
 }
 
 type OperationalDetail struct {
-	Programs []mux.Program         `json:"programs"`
-	Sources  []SourceDetail        `json:"sources"`
-	Events   []EventDetail         `json:"events"`
-	Captions []model.CaptionStatus `json:"captions"`
-	Audio    []audio.PathState     `json:"audio_paths"`
+	Programs []mux.Program          `json:"programs"`
+	Sources  []SourceDetail         `json:"sources"`
+	Events   []EventDetail          `json:"events"`
+	Captions []model.CaptionStatus  `json:"captions"`
+	Audio    []audio.PathState      `json:"audio_paths"`
+	LipSync  []model.LipSyncProfile `json:"lip_sync"`
 }
 
 func (runtime *Runtime) Detail() OperationalDetail {
@@ -36,6 +37,7 @@ func (runtime *Runtime) Detail() OperationalDetail {
 		Programs: runtime.Mux.Programs(),
 		Captions: runtime.CaptionFlow.Snapshot(),
 		Audio:    runtime.AudioState.List(),
+		LipSync:  runtime.LipSyncProfiles(),
 	}
 	for _, signal := range runtime.SourceFlow.Snapshot() {
 		detail.Sources = append(detail.Sources, SourceDetail{

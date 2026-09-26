@@ -27,6 +27,7 @@ func (server *Server) Router() http.Handler {
 		api.Get("/equipment", server.equipment)
 		api.Get("/interlocks", server.interlocks)
 		api.Get("/incidents", server.incidents)
+		api.Get("/lip-sync", server.lipSync)
 		api.Get("/snapshot", server.snapshot)
 		api.Get("/detail", server.detail)
 		api.Post("/control", server.control)

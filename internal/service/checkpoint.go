@@ -6,6 +6,7 @@ import (
 	"github.com/wyw14/solo-035/internal/backup"
 	"github.com/wyw14/solo-035/internal/event"
 	"github.com/wyw14/solo-035/internal/journal"
+	"github.com/wyw14/solo-035/internal/lipsync"
 	"github.com/wyw14/solo-035/internal/model"
 	"github.com/wyw14/solo-035/internal/quality"
 	"github.com/wyw14/solo-035/internal/syncer"
@@ -16,6 +17,7 @@ type ControlCheckpoint struct {
 	Sync    []syncer.Recovery        `json:"sync"`
 	Backup  []backup.RecoveryRecord  `json:"backup"`
 	Quality []quality.RecoveryRecord `json:"quality"`
+	LipSync []lipsync.RecoveryRecord `json:"lip_sync"`
 	Journal []journal.Record         `json:"journal"`
 }
 
@@ -30,6 +32,7 @@ func (runtime *Runtime) ExportCheckpoint() ControlCheckpoint {
 		Sync:    runtime.SyncState.ExportRecovery(),
 		Backup:  runtime.BackupState.ExportRecovery(),
 		Quality: runtime.Evidence.Export(ids),
+		LipSync: runtime.LipSync.Export(),
 		Journal: runtime.Journal.Records(),
 	}
 }
@@ -46,6 +49,9 @@ func (runtime *Runtime) RestoreCheckpoint(checkpoint ControlCheckpoint) (Recover
 	}
 	if err := runtime.Evidence.Restore(checkpoint.Quality); err != nil {
 		return RecoveryReport{}, fmt.Errorf("restore quality evidence: %w", err)
+	}
+	if err := runtime.LipSync.Restore(checkpoint.LipSync); err != nil {
+		return RecoveryReport{}, fmt.Errorf("restore lip-sync measurements: %w", err)
 	}
 	sources := make(map[model.EventID]model.SourceID)
 	for _, item := range checkpoint.Sync {

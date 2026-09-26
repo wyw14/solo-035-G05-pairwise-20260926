@@ -29,8 +29,8 @@ func (coordinator *Coordinator) Stage(event model.LiveEvent, source model.Source
 	})
 }
 
-func (coordinator *Coordinator) CommitOnAir(event model.LiveEvent, fence uint64, lipSync map[string]any) error {
-	if _, err := coordinator.journal.Persist(event.ID, "lip-sync-proof", event.Revision, fence, lipSync); err != nil {
+func (coordinator *Coordinator) CommitOnAir(event model.LiveEvent, fence uint64, lipSyncProof any) error {
+	if _, err := coordinator.journal.Persist(event.ID, "lip-sync-proof", event.Revision, fence, lipSyncProof); err != nil {
 		return err
 	}
 	if err := coordinator.state.Publish(event.ID, event.Revision, fence, coordinator.clock()); err != nil {

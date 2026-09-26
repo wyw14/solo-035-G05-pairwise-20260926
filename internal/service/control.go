@@ -10,15 +10,17 @@ import (
 )
 
 type ControlRequest struct {
-	Action      string `json:"action"`
-	EventID     string `json:"event_id"`
-	SourceID    string `json:"source_id"`
-	EncoderID   string `json:"encoder_id"`
-	Healthy     bool   `json:"healthy"`
-	Bitrate     int    `json:"bitrate"`
-	Count       int64  `json:"count"`
-	Message     string `json:"message"`
-	DelayMillis int64  `json:"delay_millis"`
+	Action          string `json:"action"`
+	EventID         string `json:"event_id"`
+	SourceID        string `json:"source_id"`
+	EncoderID       string `json:"encoder_id"`
+	Healthy         bool   `json:"healthy"`
+	Bitrate         int    `json:"bitrate"`
+	Count           int64  `json:"count"`
+	Message         string `json:"message"`
+	DelayMillis     int64  `json:"delay_millis"`
+	Index           int64  `json:"index"`
+	TimestampMillis int64  `json:"timestamp_millis"`
 }
 
 type ControlResult struct {
@@ -99,6 +101,28 @@ func (runtime *Runtime) ExecuteControl(ctx context.Context, request ControlReque
 		runtime.Quality.Reset(eventID)
 		result.Value = eventID
 		return result, nil
+	case "record-sync-marker":
+		source, err := coordinator.resolveSource(eventID, sourceID)
+		if err != nil {
+			return result, err
+		}
+		profile, err := coordinator.RecordSyncMarker(eventID, source, request.Index, controlTime(request.TimestampMillis, runtime))
+		if err != nil {
+			return result, err
+		}
+		result.Value = profile
+		return result, nil
+	case "record-audio-pulse":
+		source, err := coordinator.resolveSource(eventID, sourceID)
+		if err != nil {
+			return result, err
+		}
+		profile, err := coordinator.RecordAudioPulse(eventID, source, request.Index, controlTime(request.TimestampMillis, runtime))
+		if err != nil {
+			return result, err
+		}
+		result.Value = profile
+		return result, nil
 	case "record-gap":
 		if err := runtime.Receiver.RecordGap(sourceID, request.Count); err != nil {
 			return result, err
@@ -144,4 +168,12 @@ func (runtime *Runtime) ExecuteControl(ctx context.Context, request ControlReque
 	default:
 		return result, fmt.Errorf("unsupported control action %q", request.Action)
 	}
+}
+
+// controlTime 解析控制请求中的 Unix 毫秒时间戳；缺省时使用运行时时钟。
+func controlTime(timestampMillis int64, runtime *Runtime) time.Time {
+	if timestampMillis == 0 {
+		return runtime.Clock()
+	}
+	return time.UnixMilli(timestampMillis).UTC()
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/wyw14/solo-035/internal/encoder"
 	"github.com/wyw14/solo-035/internal/event"
 	"github.com/wyw14/solo-035/internal/journal"
+	"github.com/wyw14/solo-035/internal/lipsync"
 	"github.com/wyw14/solo-035/internal/mux"
 	"github.com/wyw14/solo-035/internal/playout"
 	"github.com/wyw14/solo-035/internal/quality"
@@ -40,6 +41,7 @@ type Runtime struct {
 	Evidence        *quality.EvidenceSet
 	Quality         *quality.Coordinator
 	Evaluator       *quality.Evaluator
+	LipSync         *lipsync.Archive
 	JournalState    *journal.State
 	JournalStore    *journal.Store
 	Journal         *journal.Integration
@@ -67,6 +69,10 @@ func NewRuntime(dataDirectory string, clock func() time.Time) (*Runtime, error) 
 	if err != nil {
 		return nil, err
 	}
+	lipSyncArchive, err := lipsync.NewArchive(lipsync.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
 	runtime := &Runtime{Clock: clock}
 	runtime.Events = event.NewState()
 	runtime.EventFlow = event.NewIntegration(runtime.Events, clock)
@@ -88,6 +94,7 @@ func NewRuntime(dataDirectory string, clock func() time.Time) (*Runtime, error) 
 	runtime.Evidence = quality.NewEvidenceSet()
 	runtime.Quality = quality.NewCoordinator(runtime.Evidence, clock)
 	runtime.Evaluator = evaluator
+	runtime.LipSync = lipSyncArchive
 	runtime.JournalState = journal.NewState()
 	runtime.JournalStore = store
 	runtime.Journal = journal.NewIntegration(store, runtime.JournalState, clock)
