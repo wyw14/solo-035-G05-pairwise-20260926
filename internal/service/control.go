@@ -10,15 +10,18 @@ import (
 )
 
 type ControlRequest struct {
-	Action      string `json:"action"`
-	EventID     string `json:"event_id"`
-	SourceID    string `json:"source_id"`
-	EncoderID   string `json:"encoder_id"`
-	Healthy     bool   `json:"healthy"`
-	Bitrate     int    `json:"bitrate"`
-	Count       int64  `json:"count"`
-	Message     string `json:"message"`
-	DelayMillis int64  `json:"delay_millis"`
+	Action      string    `json:"action"`
+	EventID     string    `json:"event_id"`
+	SourceID    string    `json:"source_id"`
+	EncoderID   string    `json:"encoder_id"`
+	Healthy     bool      `json:"healthy"`
+	Bitrate     int       `json:"bitrate"`
+	Count       int64     `json:"count"`
+	Message     string    `json:"message"`
+	DelayMillis int64     `json:"delay_millis"`
+	MarkerID    string    `json:"marker_id"`
+	VideoAt     time.Time `json:"video_at"`
+	AudioAt     time.Time `json:"audio_at"`
 }
 
 type ControlResult struct {
@@ -104,6 +107,26 @@ func (runtime *Runtime) ExecuteControl(ctx context.Context, request ControlReque
 			return result, err
 		}
 		result.Value = map[string]any{"source": sourceID, "dropped": runtime.Receiver.Dropped(sourceID)}
+		return result, nil
+	case "record-sync-measurement":
+		recorded, err := coordinator.RecordSyncMeasurement(eventID, sourceID, request.MarkerID, request.VideoAt, request.AudioAt)
+		if err != nil {
+			return result, err
+		}
+		result.Value = recorded
+		return result, nil
+	case "sync-profile":
+		profile, err := coordinator.SyncProfile(eventID)
+		if err != nil {
+			return result, err
+		}
+		result.Value = profile
+		return result, nil
+	case "reset-sync-measurements":
+		if err := runtime.SyncMeasurements.Replace(eventID, nil); err != nil {
+			return result, err
+		}
+		result.Value = eventID
 		return result, nil
 	case "schedule-failover":
 		event, ok := runtime.Events.Get(eventID)

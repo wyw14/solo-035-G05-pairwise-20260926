@@ -42,6 +42,13 @@ func Bootstrap(runtime *Runtime) error {
 	if err := coordinator.EstablishInterlocks(event.ID); err != nil {
 		return err
 	}
+	for sample := 1; sample <= 3; sample++ {
+		videoAt := base.Add(time.Duration(sample) * 40 * time.Millisecond)
+		audioAt := videoAt.Add(12 * time.Millisecond)
+		if _, err := coordinator.RecordSyncMeasurement(event.ID, sourceID, fmt.Sprintf("marker-%d", sample), videoAt, audioAt); err != nil {
+			return err
+		}
+	}
 	output, ok := runtime.Playout.Output(event.ID)
 	if !ok {
 		return fmt.Errorf("bootstrap output was not staged")

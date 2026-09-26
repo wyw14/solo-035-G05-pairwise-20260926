@@ -1,6 +1,12 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/wyw14/solo-035/internal/model"
+	"github.com/wyw14/solo-035/internal/service"
+)
 
 func (server *Server) health(writer http.ResponseWriter, request *http.Request) {
 	report := server.runtime.Diagnostics()
@@ -36,4 +42,19 @@ func (server *Server) incidents(writer http.ResponseWriter, request *http.Reques
 
 func (server *Server) snapshot(writer http.ResponseWriter, request *http.Request) {
 	writeJSON(writer, http.StatusOK, server.runtime.Snapshot())
+}
+
+func (server *Server) syncProfiles(writer http.ResponseWriter, request *http.Request) {
+	writeJSON(writer, http.StatusOK, map[string]any{"profiles": server.runtime.SyncProfiles()})
+}
+
+func (server *Server) syncProfile(writer http.ResponseWriter, request *http.Request) {
+	eventID := model.EventID(chi.URLParam(request, "eventID"))
+	coordinator := service.NewCoordinator(server.runtime)
+	profile, err := coordinator.SyncProfile(eventID)
+	if err != nil {
+		writeError(writer, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusOK, profile)
 }

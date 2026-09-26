@@ -39,6 +39,7 @@ func (runtime *Runtime) Diagnostics() DiagnosticReport {
 		runtime.checkEncoders(now),
 		runtime.checkPlayout(now),
 		runtime.checkJournal(now),
+		runtime.checkSyncMeasurements(now),
 		runtime.checkInterlocks(now),
 	}
 	sort.Slice(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
@@ -168,6 +169,7 @@ func (runtime *Runtime) checkJournal(now time.Time) DiagnosticCheck {
 	records := runtime.Journal.Records()
 	check := DiagnosticCheck{Name: "journal-order", Passed: true, CheckedAt: now}
 	proofs := make(map[model.EventID]bool)
+	proofGenerations := make(map[model.EventID]uint64)
 	for _, record := range records {
 		var payload map[string]any
 		if err := record.Decode(&payload); err != nil {
@@ -176,7 +178,30 @@ func (runtime *Runtime) checkJournal(now time.Time) DiagnosticCheck {
 			return check
 		}
 		if record.Kind == "lip-sync-proof" {
+			var proof struct {
+				Method           string  `json:"method"`
+				SourceGeneration uint64  `json:"source_generation"`
+				SampleCount      int     `json:"sample_count"`
+				StableCount      int     `json:"stable_count"`
+				OffsetMillis     float64 `json:"offset_ms"`
+			}
+			if err := record.Decode(&proof); err != nil {
+				check.Passed = false
+				check.Detail = fmt.Sprintf("lip-sync proof %s cannot be decoded", record.ID)
+				return check
+			}
+			if proof.Method != "measured-video-marker/audio-pulse" {
+				check.Passed = false
+				check.Detail = fmt.Sprintf("lip-sync proof %s is not backed by measured marker/pulse evidence", record.ID)
+				return check
+			}
+			if proof.SourceGeneration == 0 || proof.StableCount < 2 {
+				check.Passed = false
+				check.Detail = fmt.Sprintf("lip-sync proof %s lacks a current generation or a stable interval", record.ID)
+				return check
+			}
 			proofs[record.EventID] = true
+			proofGenerations[record.EventID] = proof.SourceGeneration
 		}
 		if record.Kind == "on-air" && !proofs[record.EventID] {
 			check.Passed = false
@@ -191,9 +216,74 @@ func (runtime *Runtime) checkJournal(now time.Time) DiagnosticCheck {
 			check.Detail = fmt.Sprintf("journal program generation for %s is inconsistent", operation.EventID)
 			return check
 		}
+		if (operation.Phase == model.PhaseOnAir || operation.Phase == model.PhaseFailedOver) && proofs[operation.EventID] {
+			if proofGenerations[operation.EventID] != operation.SourceGeneration {
+				check.Passed = false
+				check.Detail = fmt.Sprintf("lip-sync proof for event %s belongs to source generation %d, not the current generation %d", operation.EventID, proofGenerations[operation.EventID], operation.SourceGeneration)
+				return check
+			}
+		}
 	}
 	check.Detail = fmt.Sprintf("%d durable records at %s preserve proof-before-publication order", len(records), runtime.JournalStore.Path())
 	return check
+}
+
+func (runtime *Runtime) checkSyncMeasurements(now time.Time) DiagnosticCheck {
+	check := DiagnosticCheck{Name: "sync-measurements", Passed: true, CheckedAt: now}
+	coordinator := NewCoordinator(runtime)
+	checked := 0
+	for _, event := range runtime.Events.List() {
+		if event.Phase != model.PhaseOnAir && event.Phase != model.PhaseFailedOver {
+			continue
+		}
+		checked++
+		profile, err := coordinator.SyncProfile(event.ID)
+		if err != nil {
+			check.Passed = false
+			check.Detail = fmt.Sprintf("event %s has no sync measurement profile", event.ID)
+			return check
+		}
+		current, ok := profile.Current()
+		if !ok {
+			check.Passed = false
+			check.Detail = fmt.Sprintf("on-air event %s has no measurement for source generation %d", event.ID, event.SourceGeneration)
+			return check
+		}
+		// Once on air, the durable lip-sync proof (validated fresh and stable
+		// at commit time) is the evidence of record. A live profile may read
+		// stale between probe reports, but that is shown on the profile page
+		// rather than flipping health for an already proven generation.
+		if latestProofGeneration(runtime, event.ID) == event.SourceGeneration {
+			continue
+		}
+		if !current.EligibleProof || current.Estimate.Status != "stable" {
+			check.Passed = false
+			check.Detail = fmt.Sprintf("on-air event %s: %s", event.ID, current.Estimate.Reason)
+			return check
+		}
+	}
+	if checked == 0 {
+		check.Detail = "no on-air events require measured sync evidence"
+		return check
+	}
+	check.Detail = fmt.Sprintf("%d on-air event(s) are backed by a measured lip-sync proof for the current source generation", checked)
+	return check
+}
+
+func latestProofGeneration(runtime *Runtime, eventID model.EventID) uint64 {
+	var generation uint64
+	for _, record := range runtime.Journal.Records() {
+		if record.Kind != "lip-sync-proof" || record.EventID != eventID {
+			continue
+		}
+		var proof struct {
+			SourceGeneration uint64 `json:"source_generation"`
+		}
+		if err := record.Decode(&proof); err == nil && proof.SourceGeneration >= generation {
+			generation = proof.SourceGeneration
+		}
+	}
+	return generation
 }
 
 func (runtime *Runtime) checkInterlocks(now time.Time) DiagnosticCheck {

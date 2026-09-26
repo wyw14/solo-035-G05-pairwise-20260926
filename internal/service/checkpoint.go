@@ -9,14 +9,16 @@ import (
 	"github.com/wyw14/solo-035/internal/model"
 	"github.com/wyw14/solo-035/internal/quality"
 	"github.com/wyw14/solo-035/internal/syncer"
+	"github.com/wyw14/solo-035/internal/syncmeasure"
 )
 
 type ControlCheckpoint struct {
-	Events  []event.RecoveryRecord   `json:"events"`
-	Sync    []syncer.Recovery        `json:"sync"`
-	Backup  []backup.RecoveryRecord  `json:"backup"`
-	Quality []quality.RecoveryRecord `json:"quality"`
-	Journal []journal.Record         `json:"journal"`
+	Events          []event.RecoveryRecord       `json:"events"`
+	Sync            []syncer.Recovery            `json:"sync"`
+	SyncMeasurement []syncmeasure.RecoveryRecord `json:"sync_measurements"`
+	Backup          []backup.RecoveryRecord      `json:"backup"`
+	Quality         []quality.RecoveryRecord     `json:"quality"`
+	Journal         []journal.Record             `json:"journal"`
 }
 
 func (runtime *Runtime) ExportCheckpoint() ControlCheckpoint {
@@ -26,11 +28,12 @@ func (runtime *Runtime) ExportCheckpoint() ControlCheckpoint {
 		ids = append(ids, record.Event.ID)
 	}
 	return ControlCheckpoint{
-		Events:  events,
-		Sync:    runtime.SyncState.ExportRecovery(),
-		Backup:  runtime.BackupState.ExportRecovery(),
-		Quality: runtime.Evidence.Export(ids),
-		Journal: runtime.Journal.Records(),
+		Events:          events,
+		Sync:            runtime.SyncState.ExportRecovery(),
+		SyncMeasurement: runtime.SyncMeasurements.Export(ids),
+		Backup:          runtime.BackupState.ExportRecovery(),
+		Quality:         runtime.Evidence.Export(ids),
+		Journal:         runtime.Journal.Records(),
 	}
 }
 
@@ -40,6 +43,9 @@ func (runtime *Runtime) RestoreCheckpoint(checkpoint ControlCheckpoint) (Recover
 	}
 	if err := runtime.SyncState.RestoreRecovery(checkpoint.Sync); err != nil {
 		return RecoveryReport{}, fmt.Errorf("restore synchronization: %w", err)
+	}
+	if err := runtime.SyncMeasurements.Restore(checkpoint.SyncMeasurement); err != nil {
+		return RecoveryReport{}, fmt.Errorf("restore sync measurements: %w", err)
 	}
 	if err := runtime.BackupState.RestoreRecovery(checkpoint.Backup); err != nil {
 		return RecoveryReport{}, fmt.Errorf("restore failovers: %w", err)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/wyw14/solo-035/internal/caption"
 	"github.com/wyw14/solo-035/internal/model"
+	"github.com/wyw14/solo-035/internal/syncmeasure"
 )
 
 type Coordinator struct {
@@ -65,6 +66,44 @@ func (coordinator *Coordinator) PushFrame(eventID model.EventID, frame model.Fra
 	received.AudioLocked = frame.AudioLocked
 	_, err = coordinator.runtime.Sync.Observe(eventID, received)
 	return err
+}
+
+// RecordSyncMeasurement archives one observed video-marker/audio-pulse pair.
+// The measurement is bound to the event's current program revision and source
+// generation; pairs from older generations can never prove a newer one.
+func (coordinator *Coordinator) RecordSyncMeasurement(eventID model.EventID, sourceID model.SourceID, markerID string, videoAt, audioAt time.Time) (syncmeasure.RecordedMeasurement, error) {
+	event, ok := coordinator.runtime.Events.Get(eventID)
+	if !ok {
+		return syncmeasure.RecordedMeasurement{}, fmt.Errorf("event %s not found", eventID)
+	}
+	if !sourceID.Valid() {
+		if output, hasOutput := coordinator.runtime.Playout.Output(eventID); hasOutput {
+			sourceID = output.Source
+		}
+	}
+	measurement := syncmeasure.Measurement{
+		Source:           sourceID,
+		SourceGeneration: event.SourceGeneration,
+		Revision:         event.Revision,
+		MarkerID:         markerID,
+		VideoAt:          videoAt,
+		AudioAt:          audioAt,
+	}
+	return coordinator.runtime.SyncMeasurer.Record(eventID, measurement)
+}
+
+// SyncProfile returns the measured offset and stability profile, including
+// missing and jittering groups, for one event.
+func (coordinator *Coordinator) SyncProfile(eventID model.EventID) (syncmeasure.Profile, error) {
+	event, ok := coordinator.runtime.Events.Get(eventID)
+	if !ok {
+		return syncmeasure.Profile{}, fmt.Errorf("event %s not found", eventID)
+	}
+	sourceID := model.SourceID("")
+	if output, hasOutput := coordinator.runtime.Playout.Output(eventID); hasOutput {
+		sourceID = output.Source
+	}
+	return coordinator.runtime.SyncMeasurer.Profile(eventID, sourceID, event.Revision, event.SourceGeneration), nil
 }
 
 func (coordinator *Coordinator) ConfigureProgram(eventID model.EventID, sourceID model.SourceID) error {
@@ -135,10 +174,18 @@ func (coordinator *Coordinator) CommitOnAir(eventID model.EventID, fence uint64)
 	if _, err := coordinator.runtime.Quality.Permit(eventID, true, true); err != nil {
 		return err
 	}
-	if err := coordinator.runtime.Playout.CommitOnAir(event, fence, map[string]any{"offset_ms": 0, "source_generation": event.SourceGeneration}); err != nil {
+	output, hasOutput := coordinator.runtime.Playout.Output(eventID)
+	if !hasOutput {
+		return fmt.Errorf("playout output for event %s is not staged", eventID)
+	}
+	proof, _, err := coordinator.runtime.SyncMeasurer.ProofForCurrent(eventID, output.Source, event.Revision, event.SourceGeneration)
+	if err != nil {
 		return err
 	}
-	_, err := coordinator.runtime.EventFlow.MarkOnAir(eventID)
+	if err := coordinator.runtime.Playout.CommitOnAir(event, fence, proof); err != nil {
+		return err
+	}
+	_, err = coordinator.runtime.EventFlow.MarkOnAir(eventID)
 	return err
 }
 

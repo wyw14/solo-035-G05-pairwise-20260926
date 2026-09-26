@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/google/uuid"
@@ -20,6 +21,26 @@ func (runtime *Runtime) Snapshot() model.RuntimeSnapshot {
 		})
 		status, synced := runtime.Sync.Status(event.ID)
 		snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "frame-sync", Passed: synced && status.Stable, Detail: status.Reason})
+		if profile, err := NewCoordinator(runtime).SyncProfile(event.ID); err == nil {
+			if current, ok := profile.Current(); ok {
+				detail := current.Estimate.Reason
+				if current.EligibleProof && current.Estimate.OffsetMillis != nil {
+					detail = fmt.Sprintf("measured offset %.1f ms on %d stable samples (%s)", *current.Estimate.OffsetMillis, current.Estimate.StableCount, current.Estimate.Reason)
+				}
+				passed := current.EligibleProof
+				// For events already on air, the durable proof of the current
+				// generation is the evidence of record; live staleness between
+				// probe reports is still spelled out in the detail and on the
+				// sync profile page.
+				if (event.Phase == model.PhaseOnAir || event.Phase == model.PhaseFailedOver) && latestProofGeneration(runtime, event.ID) == event.SourceGeneration {
+					passed = true
+					if current.Estimate.Status == "stale" || current.Estimate.Status == "missing" || current.Estimate.Status == "jitter" {
+						detail = fmt.Sprintf("proved at on-air for generation %d; live profile: %s", event.SourceGeneration, current.Estimate.Reason)
+					}
+				}
+				snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "lip-sync-measurement", Passed: passed, Detail: detail})
+			}
+		}
 		captionStatus, captionKnown := runtime.Captions.Get(event.ID)
 		captionPassed := captionKnown && captionStatus.Continuous && captionStatus.EncoderErr == ""
 		snapshot.Interlocks = append(snapshot.Interlocks, model.InterlockView{EventID: event.ID, Name: "caption-continuity", Passed: captionPassed, Detail: captionStatus.EncoderErr})

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OnAirMux 音画同步实测</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header><strong>OnAirMux</strong><nav><a href="/operations.html">节目</a><a href="/equipment.html">设备</a><a href="/interlocks.html">联锁</a><a href="/sync.html">同步实测</a><a href="/incidents.html">事件</a></nav></header>
+<main>
+<section><p class="eyebrow">LIP SYNC EVIDENCE</p><h1>音画同步实测档案</h1><p id="stamp">正在连接播控服务</p></section>
+<div id="content" class="grid"></div>
+</main>
+<script>
+const content=document.getElementById("content");
+const stamp=document.getElementById("stamp");
+const statusText={stable:"稳定",jitter:"抖动",missing:"缺测",stale:"过期"};
+function fmt(v,digits=1){return v===null||v===undefined?"—":Number(v).toFixed(digits)}
+function groupCard(profile,group){
+  const e=group.estimate;
+  const current=group.current;
+  const cls=current?(e.status==="stable"?"ok":"bad"):"old";
+  const offset=e.offset_ms===undefined?"—":fmt(e.offset_ms)+" ms";
+  const interval=(e.lower_ms===undefined||e.upper_ms===undefined)?"—":`${fmt(e.lower_ms)} … ${fmt(e.upper_ms)} ms`;
+  return `<article class="item ${cls}">
+    <h2>${current?"当前代次":"历史代次"} G${group.generation}</h2>
+    <dl>
+      <dt>信号源</dt><dd>${group.group.source}</dd>
+      <dt>节目版本</dt><dd>${group.group.revision}</dd>
+      <dt>状态</dt><dd>${statusText[e.status]||e.status}</dd>
+      <dt>实测偏移(音-画)</dt><dd>${offset}</dd>
+      <dt>稳定区间</dt><dd>${interval}</dd>
+      <dt>抖动幅度</dt><dd>${e.jitter_ms===undefined?"—":fmt(e.jitter_ms)+" ms"}</dd>
+      <dt>样本数 / 稳定样本</dt><dd>${e.sample_count} / ${e.stable_count}</dd>
+      <dt>最近测量</dt><dd>${e.last_measured_at?new Date(e.last_measured_at).toLocaleTimeString():"—"}</dd>
+      <dt>说明</dt><dd>${e.reason||"—"}</dd>
+      <dt>可作为播出证明</dt><dd>${group.eligible_proof?"是":"否"}</dd>
+    </dl>
+  </article>`;
+}
+function profileCard(profile){
+  const groups=(profile.groups||[]).map(g=>groupCard(profile,g)).join("");
+  return `<section class="item"><h2>事件 ${profile.event_id}</h2>
+  <p class="eyebrow">当前信号源 ${profile.current_source||"—"} · 版本 ${profile.current_revision} · 代次 ${profile.current_generation}</p>
+  <div class="grid">${groups}</div></section>`;
+}
+async function refresh(){
+  try{
+    const response=await fetch("/api/sync-profiles",{headers:{Accept:"application/json"}});
+    const payload=await response.json();
+    const list=payload.profiles||[];
+    content.innerHTML=list.length?list.map(profileCard).join(""):`<p class="empty">当前没有同步实测档案</p>`;
+    stamp.textContent=`状态 ${response.status} · ${new Date().toLocaleTimeString()}`;
+  }catch(error){
+    content.innerHTML=`<p class="empty">服务连接失败 ${error.message}</p>`;
+    stamp.textContent="连接已中断";
+  }
+}
+refresh();setInterval(refresh,5000);
+</script>
+</body>
+</html>

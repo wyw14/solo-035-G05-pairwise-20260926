@@ -16,39 +16,42 @@ import (
 	"github.com/wyw14/solo-035/internal/quality"
 	"github.com/wyw14/solo-035/internal/source"
 	"github.com/wyw14/solo-035/internal/syncer"
+	"github.com/wyw14/solo-035/internal/syncmeasure"
 )
 
 type Runtime struct {
-	Clock           func() time.Time
-	Events          *event.State
-	EventFlow       *event.Integration
-	Sources         *source.State
-	SourceFlow      *source.Coordinator
-	Receiver        *source.Receiver
-	SyncState       *syncer.State
-	Sync            *syncer.Coordinator
-	Encoders        *encoder.State
-	EncoderFlow     *encoder.Coordinator
-	MuxState        *mux.State
-	Mux             *mux.Coordinator
-	AudioState      *audio.State
-	Audio           *audio.Switch
-	AudioMonitor    *audio.Monitor
-	Captions        *caption.State
-	CaptionFlow     *caption.Coordinator
-	Continuity      *caption.Continuity
-	Evidence        *quality.EvidenceSet
-	Quality         *quality.Coordinator
-	Evaluator       *quality.Evaluator
-	JournalState    *journal.State
-	JournalStore    *journal.Store
-	Journal         *journal.Integration
-	PlayoutState    *playout.State
-	Playout         *playout.Coordinator
-	PlayoutFlow     *playout.Integration
-	PlayoutRecovery *playout.Recovery
-	BackupState     *backup.State
-	Backup          *backup.Coordinator
+	Clock            func() time.Time
+	Events           *event.State
+	EventFlow        *event.Integration
+	Sources          *source.State
+	SourceFlow       *source.Coordinator
+	Receiver         *source.Receiver
+	SyncState        *syncer.State
+	Sync             *syncer.Coordinator
+	SyncMeasurements *syncmeasure.Archive
+	SyncMeasurer     *syncmeasure.Coordinator
+	Encoders         *encoder.State
+	EncoderFlow      *encoder.Coordinator
+	MuxState         *mux.State
+	Mux              *mux.Coordinator
+	AudioState       *audio.State
+	Audio            *audio.Switch
+	AudioMonitor     *audio.Monitor
+	Captions         *caption.State
+	CaptionFlow      *caption.Coordinator
+	Continuity       *caption.Continuity
+	Evidence         *quality.EvidenceSet
+	Quality          *quality.Coordinator
+	Evaluator        *quality.Evaluator
+	JournalState     *journal.State
+	JournalStore     *journal.Store
+	Journal          *journal.Integration
+	PlayoutState     *playout.State
+	Playout          *playout.Coordinator
+	PlayoutFlow      *playout.Integration
+	PlayoutRecovery  *playout.Recovery
+	BackupState      *backup.State
+	Backup           *backup.Coordinator
 }
 
 func NewRuntime(dataDirectory string, clock func() time.Time) (*Runtime, error) {
@@ -75,6 +78,16 @@ func NewRuntime(dataDirectory string, clock func() time.Time) (*Runtime, error) 
 	runtime.Receiver = source.NewReceiver(runtime.SourceFlow)
 	runtime.SyncState = syncer.NewState()
 	runtime.Sync = syncer.NewCoordinator(runtime.SyncState)
+	runtime.SyncMeasurements = syncmeasure.NewArchive()
+	measurer, err := syncmeasure.NewCoordinator(
+		runtime.SyncMeasurements,
+		syncmeasure.Tolerance{RequiredSamples: 3, JitterMillis: 40, MaxSampleAge: 10 * time.Second},
+		clock,
+	)
+	if err != nil {
+		return nil, err
+	}
+	runtime.SyncMeasurer = measurer
 	runtime.Encoders = encoder.NewState("encoder-primary-1", "encoder-backup-1")
 	runtime.EncoderFlow = encoder.NewCoordinator(runtime.Encoders, clock)
 	runtime.MuxState = mux.NewState()

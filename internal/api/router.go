@@ -28,6 +28,8 @@ func (server *Server) Router() http.Handler {
 		api.Get("/interlocks", server.interlocks)
 		api.Get("/incidents", server.incidents)
 		api.Get("/snapshot", server.snapshot)
+		api.Get("/sync-profiles", server.syncProfiles)
+		api.Get("/sync-profiles/{eventID}", server.syncProfile)
 		api.Get("/detail", server.detail)
 		api.Post("/control", server.control)
 		api.Get("/checkpoint", server.exportCheckpoint)
